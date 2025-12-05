@@ -1,25 +1,26 @@
 """
 Natural language parser for meeting room reservation requests.
-Extracts room name, date, and time from Korean/English messages.
+Uses OpenAI API for accurate Korean/English natural language understanding.
 """
-import re
+import os
+import json
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional
+from openai import OpenAI
 
 
 class ReservationParser:
-    """Parse natural language reservation requests."""
+    """Parse natural language reservation requests using OpenAI."""
 
-    # Room name patterns (case-insensitive)
     ROOM_NAMES = ["Delhi", "Mumbai", "Chennai"]
-    ROOM_PATTERN = r'\b(' + '|'.join(ROOM_NAMES) + r')\b'
 
     def __init__(self):
+        self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         self.now = datetime.now()
 
     def parse(self, text: str) -> Optional[dict]:
         """
-        Parse reservation request from natural language.
+        Parse reservation request from natural language using OpenAI.
 
         Returns:
             {
@@ -29,143 +30,96 @@ class ReservationParser:
             }
             or None if parsing fails
         """
-        # Extract room name
-        room_name = self._extract_room(text)
-        if not room_name:
+        today = self.now.strftime("%Y-%m-%d")
+        current_time = self.now.strftime("%H:%M")
+
+        system_prompt = f"""You are a meeting room reservation parser. Extract reservation details from Korean or English text.
+
+Available rooms: Delhi, Mumbai, Chennai
+
+Current date and time: {today} {current_time}
+
+IMPORTANT TIME PARSING RULES:
+- "오전" means AM (before noon)
+- "오후" means PM (afternoon/evening)
+- "오후 6시" = 18:00
+- "오후 6시~8시" = 18:00~20:00 (both times are PM when 오후 is used once)
+- If no AM/PM specified and hour ≤ 6, assume PM for typical work hours
+- "내일" = tomorrow
+- "모레" = day after tomorrow
+
+Return JSON only:
+{{
+    "room_name": "Delhi|Mumbai|Chennai or null if not found",
+    "date": "YYYY-MM-DD",
+    "start_hour": 0-23,
+    "start_minute": 0-59,
+    "end_hour": 0-23,
+    "end_minute": 0-59,
+    "error": "error message if parsing fails, null otherwise"
+}}
+
+Examples:
+- "오후 6시~8시 Mumbai" → {{"room_name": "Mumbai", "date": "{today}", "start_hour": 18, "start_minute": 0, "end_hour": 20, "end_minute": 0, "error": null}}
+- "내일 오전 10시~12시 Delhi" → {{"room_name": "Delhi", "date": "(tomorrow's date)", "start_hour": 10, "start_minute": 0, "end_hour": 12, "end_minute": 0, "error": null}}
+- "14:00-16:00 Chennai" → {{"room_name": "Chennai", "date": "{today}", "start_hour": 14, "start_minute": 0, "end_hour": 16, "end_minute": 0, "error": null}}
+"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0,
+                response_format={"type": "json_object"}
+            )
+
+            result = json.loads(response.choices[0].message.content)
+
+            # Validate and convert to datetime
+            if result.get("error") or not result.get("room_name"):
+                return None
+
+            room_name = result["room_name"]
+            if room_name not in self.ROOM_NAMES:
+                return None
+
+            # Parse date
+            date_str = result.get("date", today)
+            try:
+                date = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                date = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            # Build datetime objects
+            start_time = date.replace(
+                hour=result["start_hour"],
+                minute=result["start_minute"],
+                second=0,
+                microsecond=0
+            )
+            end_time = date.replace(
+                hour=result["end_hour"],
+                minute=result["end_minute"],
+                second=0,
+                microsecond=0
+            )
+
+            # Validation
+            if start_time >= end_time:
+                return None
+
+            return {
+                'room_name': room_name,
+                'start_time': start_time,
+                'end_time': end_time
+            }
+
+        except Exception as e:
+            print(f"OpenAI parsing error: {e}")
             return None
-
-        # Extract date
-        date = self._extract_date(text)
-
-        # Extract time range
-        time_range = self._extract_time_range(text)
-        if not time_range:
-            return None
-
-        start_hour, start_minute, end_hour, end_minute = time_range
-
-        # Combine date and time
-        start_time = date.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
-        end_time = date.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
-
-        # Validation
-        if start_time >= end_time:
-            return None
-        if start_time < self.now:
-            return None
-
-        return {
-            'room_name': room_name,
-            'start_time': start_time,
-            'end_time': end_time
-        }
-
-    def _extract_room(self, text: str) -> Optional[str]:
-        """Extract room name from text."""
-        match = re.search(self.ROOM_PATTERN, text, re.IGNORECASE)
-        if match:
-            # Return with proper capitalization
-            room = match.group(1)
-            for name in self.ROOM_NAMES:
-                if name.lower() == room.lower():
-                    return name
-        return None
-
-    def _extract_date(self, text: str) -> datetime:
-        """
-        Extract date from text. Defaults to today.
-
-        Patterns:
-        - "내일" / "tomorrow" → tomorrow
-        - "모레" / "day after tomorrow" → day after tomorrow
-        - "12월 5일" / "12/5" / "12-5" → specific date
-        - No date → today
-        """
-        today = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Tomorrow
-        if re.search(r'내일|tomorrow', text, re.IGNORECASE):
-            return today + timedelta(days=1)
-
-        # Day after tomorrow
-        if re.search(r'모레|day after tomorrow', text, re.IGNORECASE):
-            return today + timedelta(days=2)
-
-        # Specific date: "12월 5일", "12/5", "12-5"
-        date_patterns = [
-            r'(\d{1,2})월\s*(\d{1,2})일',  # 12월 5일
-            r'(\d{1,2})/(\d{1,2})',         # 12/5
-            r'(\d{1,2})-(\d{1,2})',         # 12-5
-        ]
-
-        for pattern in date_patterns:
-            match = re.search(pattern, text)
-            if match:
-                month = int(match.group(1))
-                day = int(match.group(2))
-                try:
-                    # Try this year first
-                    result = datetime(self.now.year, month, day)
-                    # If date is in the past, assume next year
-                    if result < today:
-                        result = datetime(self.now.year + 1, month, day)
-                    return result
-                except ValueError:
-                    pass  # Invalid date, continue
-
-        # Default to today
-        return today
-
-    def _extract_time_range(self, text: str) -> Optional[Tuple[int, int, int, int]]:
-        """
-        Extract time range from text.
-
-        Returns: (start_hour, start_minute, end_hour, end_minute)
-
-        Patterns:
-        - "오후 4:00~6:00" / "4:00pm-6:00pm"
-        - "14시~16시" / "14:00-16:00"
-        - "오전 10시부터 12시까지"
-        """
-        # Pattern 1: "오후 4:00~6:00" or "4:00pm~6:00pm"
-        pattern1 = r'(오전|오후|am|pm)?\s*(\d{1,2}):?(\d{2})?\s*(?:~|-|부터|to)\s*(오전|오후|am|pm)?\s*(\d{1,2}):?(\d{2})?'
-        match = re.search(pattern1, text, re.IGNORECASE)
-        if match:
-            am_pm1 = match.group(1) or ''
-            start_hour = int(match.group(2))
-            start_minute = int(match.group(3) or 0)
-            am_pm2 = match.group(4) or am_pm1  # Inherit AM/PM from start time
-            end_hour = int(match.group(5))
-            end_minute = int(match.group(6) or 0)
-
-            # Convert to 24-hour format
-            start_hour = self._to_24hour(start_hour, am_pm1)
-            end_hour = self._to_24hour(end_hour, am_pm2)
-
-            return (start_hour, start_minute, end_hour, end_minute)
-
-        # Pattern 2: "14시~16시" or "14-16"
-        pattern2 = r'(\d{1,2})시?\s*(?:~|-|부터|to)\s*(\d{1,2})시?'
-        match = re.search(pattern2, text)
-        if match:
-            start_hour = int(match.group(1))
-            end_hour = int(match.group(2))
-            return (start_hour, 0, end_hour, 0)
-
-        return None
-
-    def _to_24hour(self, hour: int, am_pm: str) -> int:
-        """Convert hour to 24-hour format based on AM/PM."""
-        am_pm_lower = am_pm.lower()
-
-        if '오후' in am_pm_lower or 'pm' in am_pm_lower:
-            if hour != 12:
-                hour += 12
-        elif '오전' in am_pm_lower or 'am' in am_pm_lower:
-            if hour == 12:
-                hour = 0
-
-        return hour
 
 
 def is_status_request(text: str) -> bool:

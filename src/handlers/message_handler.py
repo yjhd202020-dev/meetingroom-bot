@@ -6,19 +6,36 @@ from utils.nlp_parser import ReservationParser, is_status_request
 from services.reservation_service import ReservationService
 
 
+def get_user_display_name(client, user_id: str) -> str:
+    """Get user's display name from Slack API."""
+    try:
+        result = client.users_info(user=user_id)
+        if result["ok"]:
+            user = result["user"]
+            # Priority: display_name > real_name > name
+            profile = user.get("profile", {})
+            display_name = profile.get("display_name") or profile.get("real_name") or user.get("name", "Unknown")
+            return display_name
+    except Exception as e:
+        print(f"Error fetching user info: {e}")
+    return "Unknown"
+
+
 def register_message_handlers(app: App, reservation_service: ReservationService):
     """Register all message-related event handlers."""
 
     parser = ReservationParser()
 
     @app.event("app_mention")
-    def handle_app_mention(event, say, logger):
+    def handle_app_mention(event, say, client, logger):
         """Handle @bot mentions."""
         text = event.get("text", "")
         user_id = event.get("user")
-        user_name = event.get("username", "Unknown")
 
-        logger.info(f"Received mention from {user_name}: {text}")
+        # Get user display name from Slack API
+        user_name = get_user_display_name(client, user_id)
+
+        logger.info(f"Received mention from {user_name} ({user_id}): {text}")
 
         # Remove bot mention from text for parsing
         # Format: "<@U123456> 오후 4시~6시 Delhi 예약"
@@ -57,7 +74,7 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
         say(result['message'])
 
     @app.message()
-    def handle_message(message, say, logger):
+    def handle_message(message, say, client, logger):
         """
         Handle direct messages in the channel.
         Only processes messages in allowed channels (if configured).
@@ -68,9 +85,11 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
 
         text = message.get("text", "")
         user_id = message.get("user")
-        user_name = message.get("username", "Unknown")
 
-        logger.info(f"Received message from {user_name}: {text}")
+        # Get user display name from Slack API
+        user_name = get_user_display_name(client, user_id)
+
+        logger.info(f"Received message from {user_name} ({user_id}): {text}")
 
         # Check if status request
         if is_status_request(text):
