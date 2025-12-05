@@ -14,6 +14,7 @@ class MeetingRoomAssistant:
 
     def __init__(self):
         self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        self.web_url = os.environ.get("WEB_URL", "")  # 웹 캘린더 URL
 
     def get_current_context(self) -> dict:
         """Get current date/time context."""
@@ -206,11 +207,16 @@ class MeetingRoomAssistant:
 ## 회의실 정보
 Delhi(델리), Mumbai(뭄바이), Chennai(첸나이) 이렇게 3개 있어요!
 
+## 웹 캘린더
+{f'예약 현황을 한눈에 볼 수 있는 웹페이지가 있어요: {self.web_url}' if self.web_url else '웹 캘린더는 아직 준비 중이에요!'}
+
 ## 너의 역할
 1. 사용자랑 자연스럽게 대화하기
 2. 회의실 예약 관련이면 function 호출해서 처리
 3. 회의실 예약 외의 대화도 친근하게 응대
 4. 모르는 거 물어보면 솔직하게 "저도 잘 모르겠어요 ㅋㅋㅋ" 이런 식으로
+5. 전체 예약 현황 보여줄 때, 웹 캘린더 링크도 같이 안내해주기 (있으면)
+6. "캘린더로 보고 싶어", "웹으로 볼 수 있어?" 같은 질문에 웹 링크 안내
 
 ## 시간 해석
 - "오후 4시~6시" = 16:00~18:00
