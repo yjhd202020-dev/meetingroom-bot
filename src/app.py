@@ -13,9 +13,10 @@ from services.reservation_service import ReservationService
 from handlers.message_handler import register_message_handlers
 
 
-# Load environment variables
+# Load environment variables (optional - for local development)
 env_path = Path(__file__).parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 # Validate required environment variables
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
