@@ -72,7 +72,8 @@ INTENT TYPES:
 4. "status" - User wants to see reservation schedule for a specific week (이번주/다음주 예약 현황)
 5. "all_reservations" - User wants to see ALL future reservations (전체 예약, 모든 예약)
 6. "my_reservations" - User wants to see their own reservations only
-7. "unknown" - Cannot understand what user wants
+7. "help" - User wants to see help/guide/wizard (도움말, 헬프, help, wizard, 사용법, 뭐할수있어, 기능)
+8. "unknown" - Cannot understand what user wants
 
 === TIME UNDERSTANDING ===
 Korean time expressions:
@@ -92,7 +93,7 @@ If no number mentioned, set reservation_id to null.
 
 Return JSON only:
 {{
-    "intent": "reserve|recurring|cancel|status|all_reservations|my_reservations|unknown",
+    "intent": "reserve|recurring|cancel|status|all_reservations|my_reservations|help|unknown",
     "room_name": "Delhi|Mumbai|Chennai|null",
     "date": "YYYY-MM-DD or null (for single reservation)",
     "start_hour": 0-23 or null,
