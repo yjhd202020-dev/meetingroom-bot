@@ -97,12 +97,18 @@ def update_home_tab(client, event, logger):
 
 # FastAPI application for HTTP Mode
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # Create FastAPI app
 api = FastAPI(title="Meeting Room Reservation Bot")
 
+# Serve frontend static files
+frontend_build_path = Path(__file__).parent.parent / "frontend" / "build"
+if frontend_build_path.exists():
+    api.mount("/static", StaticFiles(directory=str(frontend_build_path / "static")), name="static")
+
 # Health check endpoint for Railway
-@api.get("/")
 @api.get("/health")
 async def health():
     """Health check endpoint."""
@@ -111,6 +117,15 @@ async def health():
         "service": "meetingroom-bot",
         "database": db_path
     }
+
+# Serve frontend index.html for root path
+@api.get("/")
+async def serve_frontend():
+    """Serve the frontend calendar page."""
+    index_path = frontend_build_path / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return {"message": "Frontend not built. Run 'cd frontend && npm run build'"}
 
 # Slack events endpoint
 @api.post("/slack/events")
