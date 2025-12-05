@@ -7,58 +7,31 @@ from services.reservation_service import ReservationService
 
 
 def get_help_message() -> str:
-    """Return comprehensive help message with all bot capabilities."""
-    return """🏢 *회의실 예약 봇 사용 가이드* 🤖
+    """Return comprehensive help message."""
+    return """안녕하세요! 저는 회의실 예약을 도와드리는 봇이에요 🤖
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🏢 사용 가능한 회의실*
+Delhi(델리) | Mumbai(뭄바이) | Chennai(첸나이)
 
-📌 *이용 가능한 회의실*
-• Delhi (델리)
-• Mumbai (뭄바이)
-• Chennai (첸나이)
+*📅 예약하기*
+그냥 편하게 말씀하시면 돼요!
+• `오늘 오후 3시~5시 델리 예약해줘`
+• `내일 10시부터 12시까지 뭄바이`
+• `다음주 화요일 14~16시 첸나이`
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🔁 매주 반복 예약*
+• `매주 금요일 16~18시 뭄바이`
+• `매주 월요일 오전 10시~12시 델리`
 
-📅 *예약하기*
-자연어로 편하게 말씀하세요!
+*📋 예약 확인*
+• `이번주 예약 현황` - 이번주 스케줄
+• `전체 예약` - 모든 예약 보기
+• `내 예약` - 내가 한 예약만
 
-• `@봇 오후 4시~6시 Delhi 예약`
-• `@봇 내일 오전 10시~12시 뭄바이`
-• `@봇 다음주 화요일 14:00-16:00 첸나이`
-• `@봇 12월 10일 3시~5시 델리`
+*❌ 예약 취소*
+• `내 예약` 확인 후 → `3번 취소`
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔁 *반복 예약* (매주 정기 예약)
-4주간 자동으로 예약됩니다!
-
-• `@봇 매주 금요일 16:00~18:00 Mumbai`
-• `@봇 매주 월요일 오전 10시~12시 Delhi`
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📋 *예약 현황 보기*
-
-• `@봇 이번주 예약 현황` - 이번주 예약
-• `@봇 다음주 예약 현황` - 다음주 예약
-• `@봇 전체 예약 현황` - 모든 예약 보기
-• `@봇 내 예약` - 내가 한 예약만 보기
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-❌ *예약 취소하기*
-
-1. 먼저 `@봇 내 예약` 으로 예약 번호 확인
-2. `@봇 [번호] 취소` (예: `@봇 5 취소`)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💡 *팁*
-• 시간은 "오후 3시", "15:00", "3pm" 모두 인식해요
-• 회의실 이름은 영어/한글 모두 OK
-• 자연스럽게 말해도 이해해요!
-
-_언제든 `@봇 도움말` 로 이 안내를 다시 볼 수 있어요_ 😊"""
+편하게 물어보세요! 😊"""
 
 
 def get_user_display_name(client, user_id: str) -> str:
@@ -79,7 +52,10 @@ def handle_intent(parsed: dict, user_id: str, user_name: str, reservation_servic
     """Handle parsed intent and respond."""
     intent = parsed['intent']
 
-    if intent == 'status':
+    if intent == 'help':
+        say(get_help_message())
+
+    elif intent == 'status':
         status = reservation_service.get_weekly_status(parsed['week_offset'])
         say(status)
 
@@ -96,11 +72,16 @@ def handle_intent(parsed: dict, user_id: str, user_name: str, reservation_servic
             result = reservation_service.cancel_reservation(parsed['reservation_id'], user_id)
             say(result['message'])
         else:
+            # 취소할 예약 번호를 안 알려줬으면 목록 보여주기
             result = reservation_service.get_user_reservations(user_id)
             if result['reservations']:
-                say(result['message'])
+                say(
+                    "어떤 예약을 취소할까요? 🤔\n\n"
+                    f"{result['message']}\n\n"
+                    "_취소할 예약 번호를 알려주세요! (예: `3번 취소`)_"
+                )
             else:
-                say("📭 취소할 예약이 없습니다.")
+                say("취소할 예약이 없어요! 📭")
 
     elif intent == 'reserve':
         if parsed['room_name'] and parsed['start_time'] and parsed['end_time']:
@@ -113,12 +94,20 @@ def handle_intent(parsed: dict, user_id: str, user_name: str, reservation_servic
             )
             say(result['message'])
         else:
+            # 정보 부족 시 친절하게 안내
+            missing = []
+            if not parsed['room_name']:
+                missing.append("회의실 (Delhi/Mumbai/Chennai)")
+            if not parsed['start_time']:
+                missing.append("날짜와 시간")
+
             say(
-                "죄송합니다. 예약 정보가 부족합니다. 😅\n\n"
-                "*예약 방법:*\n"
-                "• `@봇 오후 4:00~6:00 Delhi 예약`\n"
-                "• `@봇 내일 오전 10시~12시 Mumbai`\n"
-                "• `@봇 다음주 화요일 14:00-16:00 Chennai`"
+                f"예약하려면 조금 더 정보가 필요해요! 🙏\n\n"
+                f"*부족한 정보:* {', '.join(missing)}\n\n"
+                "*예시:*\n"
+                "• `오늘 오후 3시~5시 델리`\n"
+                "• `내일 10~12시 뭄바이`\n"
+                "• `다음주 월요일 14~16시 첸나이`"
             )
 
     elif intent == 'recurring':
@@ -139,20 +128,26 @@ def handle_intent(parsed: dict, user_id: str, user_name: str, reservation_servic
             )
             say(result['message'])
         else:
-            say(
-                "죄송합니다. 반복 예약 정보가 부족합니다. 😅\n\n"
-                "*반복 예약 방법:*\n"
-                "• `@봇 매주 금요일 16:00~18:00 Mumbai`\n"
-                "• `@봇 매주 월요일 오전 10시~12시 Delhi`"
-            )
+            missing = []
+            if not parsed['room_name']:
+                missing.append("회의실")
+            if parsed['recurring_weekday'] is None:
+                missing.append("요일")
+            if parsed['start_hour'] is None:
+                missing.append("시간")
 
-    elif intent == 'help':
-        say(get_help_message())
+            say(
+                f"반복 예약하려면 조금 더 정보가 필요해요! 🙏\n\n"
+                f"*부족한 정보:* {', '.join(missing)}\n\n"
+                "*예시:*\n"
+                "• `매주 금요일 16~18시 뭄바이`\n"
+                "• `매주 월요일 오전 10시~12시 델리`"
+            )
 
     else:  # unknown
         say(
-            "죄송합니다. 요청을 이해하지 못했습니다. 😅\n\n"
-            "`@봇 도움말` 을 입력하면 사용법을 볼 수 있어요!"
+            "음... 무슨 말씀이신지 잘 모르겠어요 🤔\n\n"
+            "`도움말` 이라고 하시면 제가 할 수 있는 것들을 알려드릴게요!"
         )
 
 
@@ -173,6 +168,11 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
         # Remove bot mention from text
         clean_text = text.split(">", 1)[-1].strip() if ">" in text else text
 
+        # 빈 메시지면 도움말 보여주기
+        if not clean_text:
+            say(get_help_message())
+            return
+
         # Parse intent using LLM
         parsed = parser.parse(clean_text)
         logger.info(f"Parsed intent: {parsed['intent']}, data: {parsed}")
@@ -190,10 +190,9 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
         user_id = message.get("user")
         user_name = get_user_display_name(client, user_id)
 
-        logger.info(f"Received message from {user_name} ({user_id}): {text}")
+        logger.info(f"Received DM from {user_name} ({user_id}): {text}")
 
         parsed = parser.parse(text)
 
-        # Only respond to recognized intents in DM
-        if parsed['intent'] != 'unknown':
-            handle_intent(parsed, user_id, user_name, reservation_service, say)
+        # DM에서는 모든 의도에 응답 (unknown 포함)
+        handle_intent(parsed, user_id, user_name, reservation_service, say)
