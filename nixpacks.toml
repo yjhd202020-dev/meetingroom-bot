@@ -14,4 +14,4 @@ cmds = [
 ]
 
 [start]
-cmd = "cd src && python3 main.py"
+cmd = "cd src && python3 app.py"
