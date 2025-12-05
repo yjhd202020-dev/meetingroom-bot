@@ -62,25 +62,25 @@ Next week dates:
 
 Available rooms: Delhi, Mumbai, Chennai (뭄바이=Mumbai, 델리=Delhi, 첸나이=Chennai)
 
-=== INTENT TYPES ===
-1. "reserve" - User wants to make a reservation (예약, 잡아줘, 예약해줘)
-2. "cancel" - User wants to cancel a reservation (취소, 삭제, 예약 취소하고 싶어, 취소하고 싶어)
-3. "status" - User wants to see all reservation status (전체 예약, 예약 현황, 이번주/다음주 예약)
-4. "my_reservations" - User wants to see ONLY their own reservations (내 예약, 나의 예약)
-5. "unknown" - Cannot determine intent
+=== YOUR TASK ===
+Understand the user's natural language request and determine their intent.
 
-IMPORTANT: "취소" keyword = always "cancel" intent, even without reservation number
+INTENT TYPES:
+1. "reserve" - User wants to book a meeting room (needs room name + time)
+2. "cancel" - User wants to cancel an existing reservation
+3. "status" - User wants to see overall reservation schedule (all rooms, specific week)
+4. "my_reservations" - User wants to see their own reservations only
+5. "unknown" - Cannot understand what user wants
 
-=== TIME PARSING RULES ===
-- "오전" = AM (before 12:00)
-- "오후" = PM (12:00 or after)
-- "오후 6시~8시" = 18:00~20:00 (BOTH times are PM when only one 오후 is mentioned)
-- "10~2시" or "10시~2시" without AM/PM = 10:00~14:00 (assume crossing noon)
-- If only one time has AM/PM, apply it contextually
+=== TIME UNDERSTANDING ===
+Korean time expressions:
+- 오전 = morning/AM, 오후 = afternoon/PM
+- When user says "오후 6시~8시", both 6 and 8 are PM (18:00~20:00)
+- "10시~2시" typically means 10:00 AM to 2:00 PM (crossing noon)
 
-=== CANCEL PARSING ===
-- "5번 취소", "5 취소" → reservation_id: 5
-- Just "취소" without number → reservation_id: null
+=== CANCEL REQUESTS ===
+If user mentions a specific number with cancel intent, extract it as reservation_id.
+If no number mentioned, set reservation_id to null (system will show their reservations).
 
 Return JSON only:
 {{
