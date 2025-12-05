@@ -1,0 +1,154 @@
+"""
+Business logic for meeting room reservations.
+"""
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List
+from src.models.database import Database
+
+
+class ReservationService:
+    """Service layer for reservation operations."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def create_reservation(
+        self,
+        room_name: str,
+        slack_user_id: str,
+        slack_username: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict:
+        """
+        Attempt to create a reservation.
+
+        Returns:
+            {
+                'success': bool,
+                'message': str,
+                'reservation_id': int (if success),
+                'conflict': dict (if failed due to overlap)
+            }
+        """
+        # Get room
+        room = self.db.get_room_by_name(room_name)
+        if not room:
+            return {
+                'success': False,
+                'message': f"❌ 회의실을 찾을 수 없습니다: {room_name}"
+            }
+
+        # Check for conflicts
+        conflict = self.db.check_overlap(room['id'], start_time, end_time)
+        if conflict:
+            return {
+                'success': False,
+                'message': self._format_conflict_message(room_name, start_time, end_time, conflict),
+                'conflict': conflict
+            }
+
+        # Create reservation
+        reservation_id = self.db.create_reservation(
+            room['id'],
+            slack_user_id,
+            slack_username,
+            start_time,
+            end_time
+        )
+
+        if reservation_id:
+            return {
+                'success': True,
+                'message': self._format_success_message(room_name, start_time, end_time, slack_username),
+                'reservation_id': reservation_id
+            }
+        else:
+            return {
+                'success': False,
+                'message': "❌ 예약 중 오류가 발생했습니다. 다시 시도해주세요."
+            }
+
+    def get_weekly_status(self) -> str:
+        """Get formatted weekly reservation status."""
+        # Get start of current week (Monday)
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        days_since_monday = today.weekday()
+        week_start = today - timedelta(days=days_since_monday)
+
+        # Get all reservations for this week
+        reservations = self.db.get_weekly_reservations(week_start)
+
+        # Get all rooms
+        rooms = self.db.get_all_rooms()
+
+        # Group reservations by room
+        reservations_by_room = {room['name']: [] for room in rooms}
+        for res in reservations:
+            reservations_by_room[res['room_name']].append(res)
+
+        # Format message
+        week_end = week_start + timedelta(days=6)
+        message = f"📅 이번 주 회의실 예약 현황 ({week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')})\n\n"
+
+        for room in rooms:
+            room_name = room['name']
+            room_reservations = reservations_by_room[room_name]
+
+            message += f"🏢 *{room_name}*\n"
+
+            if room_reservations:
+                for res in room_reservations:
+                    start = datetime.fromisoformat(res['start_time'])
+                    end = datetime.fromisoformat(res['end_time'])
+                    weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+
+                    message += f"   • {start.strftime('%m/%d')} ({weekday}) "
+                    message += f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')} "
+                    message += f"| <@{res['slack_user_id']}>\n"
+            else:
+                message += "   (예약 없음)\n"
+
+            message += "\n"
+
+        return message.strip()
+
+    def _format_success_message(
+        self,
+        room_name: str,
+        start_time: datetime,
+        end_time: datetime,
+        username: str
+    ) -> str:
+        """Format successful reservation message."""
+        weekday = ['월', '화', '수', '목', '금', '토', '일'][start_time.weekday()]
+
+        return f"""✅ *예약 완료!*
+
+🏢 회의실: *{room_name}*
+📅 날짜: {start_time.strftime('%Y년 %m월 %d일')} ({weekday})
+🕐 시간: {start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')}
+👤 예약자: {username}"""
+
+    def _format_conflict_message(
+        self,
+        room_name: str,
+        requested_start: datetime,
+        requested_end: datetime,
+        conflict: dict
+    ) -> str:
+        """Format conflict error message."""
+        existing_start = datetime.fromisoformat(conflict['start_time'])
+        existing_end = datetime.fromisoformat(conflict['end_time'])
+        weekday = ['월', '화', '수', '목', '금', '토', '일'][existing_start.weekday()]
+
+        return f"""❌ *예약 불가*
+
+🏢 회의실: *{room_name}*
+🕐 요청 시간: {requested_start.strftime('%m/%d %H:%M')} ~ {requested_end.strftime('%H:%M')}
+⚠️ 이유: 해당 시간에 이미 예약이 있습니다.
+
+*기존 예약 정보:*
+📅 날짜: {existing_start.strftime('%Y년 %m월 %d일')} ({weekday})
+🕐 시간: {existing_start.strftime('%H:%M')} ~ {existing_end.strftime('%H:%M')}
+👤 예약자: <@{conflict['slack_user_id']}>"""
