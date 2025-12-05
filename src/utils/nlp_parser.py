@@ -66,11 +66,13 @@ Available rooms: Delhi, Mumbai, Chennai (뭄바이=Mumbai, 델리=Delhi, 첸나�
 Understand the user's natural language request and determine their intent.
 
 INTENT TYPES:
-1. "reserve" - User wants to book a meeting room (needs room name + time)
-2. "cancel" - User wants to cancel an existing reservation
-3. "status" - User wants to see overall reservation schedule (all rooms, specific week)
-4. "my_reservations" - User wants to see their own reservations only
-5. "unknown" - Cannot understand what user wants
+1. "reserve" - User wants to book a meeting room for a specific date/time
+2. "recurring" - User wants to create RECURRING/REPEATED reservations (매주, every week, 정기 예약)
+3. "cancel" - User wants to cancel an existing reservation
+4. "status" - User wants to see reservation schedule for a specific week (이번주/다음주 예약 현황)
+5. "all_reservations" - User wants to see ALL future reservations (전체 예약, 모든 예약)
+6. "my_reservations" - User wants to see their own reservations only
+7. "unknown" - Cannot understand what user wants
 
 === TIME UNDERSTANDING ===
 Korean time expressions:
@@ -78,21 +80,29 @@ Korean time expressions:
 - When user says "오후 6시~8시", both 6 and 8 are PM (18:00~20:00)
 - "10시~2시" typically means 10:00 AM to 2:00 PM (crossing noon)
 
+=== RECURRING RESERVATION ===
+If user says "매주 금요일 16시~18시 뭄바이" or "every Friday 4pm-6pm Mumbai":
+- intent = "recurring"
+- Extract weekday (0=Monday ... 6=Sunday)
+- Extract time
+
 === CANCEL REQUESTS ===
 If user mentions a specific number with cancel intent, extract it as reservation_id.
-If no number mentioned, set reservation_id to null (system will show their reservations).
+If no number mentioned, set reservation_id to null.
 
 Return JSON only:
 {{
-    "intent": "reserve|cancel|status|my_reservations|unknown",
+    "intent": "reserve|recurring|cancel|status|all_reservations|my_reservations|unknown",
     "room_name": "Delhi|Mumbai|Chennai|null",
-    "date": "YYYY-MM-DD or null",
+    "date": "YYYY-MM-DD or null (for single reservation)",
     "start_hour": 0-23 or null,
     "start_minute": 0-59 or null,
     "end_hour": 0-23 or null,
     "end_minute": 0-59 or null,
     "reservation_id": number or null,
-    "week_offset": 0 or 1 or -1
+    "week_offset": 0 or 1 or -1,
+    "recurring_weekday": 0-6 or null (0=Monday, 4=Friday, 6=Sunday),
+    "recurring_weeks": number or 4 (default 4 weeks)
 }}"""
 
         try:
@@ -113,10 +123,17 @@ Return JSON only:
                 'room_name': result.get('room_name'),
                 'start_time': None,
                 'end_time': None,
+                'start_hour': result.get('start_hour'),
+                'start_minute': result.get('start_minute', 0),
+                'end_hour': result.get('end_hour'),
+                'end_minute': result.get('end_minute', 0),
                 'reservation_id': result.get('reservation_id'),
-                'week_offset': result.get('week_offset', 0)
+                'week_offset': result.get('week_offset', 0),
+                'recurring_weekday': result.get('recurring_weekday'),
+                'recurring_weeks': result.get('recurring_weeks', 4)
             }
 
+            # Parse datetime for single reservation
             if parsed['intent'] == 'reserve' and result.get('date') and result.get('start_hour') is not None:
                 try:
                     date = datetime.strptime(result['date'], "%Y-%m-%d")
@@ -139,4 +156,13 @@ Return JSON only:
 
         except Exception as e:
             print(f"OpenAI parsing error: {e}")
-            return {'intent': 'unknown', 'room_name': None, 'start_time': None, 'end_time': None, 'reservation_id': None, 'week_offset': 0}
+            return {
+                'intent': 'unknown',
+                'room_name': None,
+                'start_time': None,
+                'end_time': None,
+                'reservation_id': None,
+                'week_offset': 0,
+                'recurring_weekday': None,
+                'recurring_weeks': 4
+            }

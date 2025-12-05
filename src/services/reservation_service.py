@@ -225,3 +225,94 @@ class ReservationService:
                 'success': False,
                 'message': "❌ 예약 취소 중 오류가 발생했습니다."
             }
+
+    def get_all_reservations(self) -> str:
+        """Get all future reservations formatted as message."""
+        reservations = self.db.get_all_future_reservations()
+
+        if not reservations:
+            return "📭 예약된 회의실이 없습니다."
+
+        message = "📋 *전체 예약 현황*\n\n"
+
+        # Group by date
+        by_date = {}
+        for res in reservations:
+            start = datetime.fromisoformat(res['start_time']) if isinstance(res['start_time'], str) else res['start_time']
+            date_key = start.strftime('%Y-%m-%d')
+            if date_key not in by_date:
+                by_date[date_key] = []
+            by_date[date_key].append(res)
+
+        for date_key in sorted(by_date.keys()):
+            date_reservations = by_date[date_key]
+            first_res = date_reservations[0]
+            start = datetime.fromisoformat(first_res['start_time']) if isinstance(first_res['start_time'], str) else first_res['start_time']
+            weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+
+            message += f"*📅 {start.strftime('%m/%d')} ({weekday})*\n"
+
+            for res in date_reservations:
+                res_start = datetime.fromisoformat(res['start_time']) if isinstance(res['start_time'], str) else res['start_time']
+                res_end = datetime.fromisoformat(res['end_time']) if isinstance(res['end_time'], str) else res['end_time']
+                message += f"   • {res['room_name']} {res_start.strftime('%H:%M')}-{res_end.strftime('%H:%M')} | <@{res['slack_user_id']}>\n"
+
+            message += "\n"
+
+        return message.strip()
+
+    def create_recurring_reservation(
+        self,
+        room_name: str,
+        slack_user_id: str,
+        slack_username: str,
+        weekday: int,
+        start_hour: int,
+        start_minute: int,
+        end_hour: int,
+        end_minute: int,
+        weeks: int = 4
+    ) -> Dict:
+        """Create recurring reservations for N weeks."""
+        weekday_names = ['월', '화', '수', '목', '금', '토', '일']
+
+        room = self.db.get_room_by_name(room_name)
+        if not room:
+            return {
+                'success': False,
+                'message': f"❌ 회의실을 찾을 수 없습니다: {room_name}"
+            }
+
+        created_ids, conflicts = self.db.create_recurring_reservations(
+            room_id=room['id'],
+            slack_user_id=slack_user_id,
+            slack_username=slack_username,
+            start_hour=start_hour,
+            start_minute=start_minute,
+            end_hour=end_hour,
+            end_minute=end_minute,
+            weekday=weekday,
+            weeks=weeks
+        )
+
+        if not created_ids:
+            return {
+                'success': False,
+                'message': f"❌ 예약 생성 실패. 모든 날짜에 충돌이 있습니다.\n충돌 날짜: {', '.join(conflicts)}"
+            }
+
+        message = f"""✅ *반복 예약 완료!*
+
+🏢 회의실: *{room_name}*
+📅 일정: 매주 {weekday_names[weekday]}요일
+🕐 시간: {start_hour:02d}:{start_minute:02d} ~ {end_hour:02d}:{end_minute:02d}
+🔁 생성된 예약: {len(created_ids)}건 ({weeks}주간)"""
+
+        if conflicts:
+            message += f"\n⚠️ 충돌로 제외된 날짜: {', '.join(conflicts)}"
+
+        return {
+            'success': True,
+            'message': message,
+            'reservation_ids': created_ids
+        }

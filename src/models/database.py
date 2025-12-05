@@ -306,3 +306,95 @@ class Database:
         result = self._fetchone_dict(cursor, row)
         conn.close()
         return result
+
+    def get_all_future_reservations(self, limit: int = 50) -> List[Dict]:
+        """Get all future reservations across all rooms."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        now = datetime.now()
+        p = self._param()
+        cursor.execute(f"""
+            SELECT r.*, rm.name as room_name
+            FROM reservations r
+            JOIN rooms rm ON r.room_id = rm.id
+            WHERE r.end_time > {p}
+            ORDER BY r.start_time
+            LIMIT {limit}
+        """, (now,))
+
+        rows = cursor.fetchall()
+        result = self._fetchall_dict(cursor, rows)
+        conn.close()
+        return result
+
+    def create_recurring_reservations(
+        self,
+        room_id: int,
+        slack_user_id: str,
+        slack_username: str,
+        start_hour: int,
+        start_minute: int,
+        end_hour: int,
+        end_minute: int,
+        weekday: int,
+        weeks: int = 4
+    ) -> List[int]:
+        """
+        Create recurring reservations for N weeks.
+        weekday: 0=Monday, 1=Tuesday, ..., 6=Sunday
+        Returns list of created reservation IDs.
+        """
+        from datetime import timedelta
+
+        now = datetime.now()
+        # Find the next occurrence of the specified weekday
+        days_ahead = weekday - now.weekday()
+        if days_ahead <= 0:  # Target day already happened this week
+            days_ahead += 7
+
+        next_date = now + timedelta(days=days_ahead)
+        created_ids = []
+        conflicts = []
+
+        for week in range(weeks):
+            target_date = next_date + timedelta(weeks=week)
+            start_time = target_date.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+            end_time = target_date.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
+
+            # Check for conflict
+            conflict = self.check_overlap(room_id, start_time, end_time)
+            if conflict:
+                conflicts.append(target_date.strftime("%Y-%m-%d"))
+                continue
+
+            # Create reservation
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            p = self._param()
+
+            try:
+                if self.is_postgres:
+                    cursor.execute(f"""
+                        INSERT INTO reservations
+                        (room_id, slack_user_id, slack_username, start_time, end_time)
+                        VALUES ({p}, {p}, {p}, {p}, {p})
+                        RETURNING id
+                    """, (room_id, slack_user_id, slack_username, start_time, end_time))
+                    reservation_id = cursor.fetchone()[0]
+                else:
+                    cursor.execute(f"""
+                        INSERT INTO reservations
+                        (room_id, slack_user_id, slack_username, start_time, end_time)
+                        VALUES ({p}, {p}, {p}, {p}, {p})
+                    """, (room_id, slack_user_id, slack_username, start_time, end_time))
+                    reservation_id = cursor.lastrowid
+
+                conn.commit()
+                created_ids.append(reservation_id)
+            except Exception as e:
+                print(f"Error creating recurring reservation: {e}")
+            finally:
+                conn.close()
+
+        return created_ids, conflicts
