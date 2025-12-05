@@ -1,9 +1,10 @@
 [phases.setup]
-nixPkgs = ["nodejs-18_x", "python311", "python311Packages.pip", "gcc"]
+nixPkgs = ["nodejs-18_x", "gcc"]
+aptPkgs = ["python3", "python3-pip", "python3-dev", "libpq-dev"]
 
 [phases.install]
 cmds = [
-    "python -m pip install -r requirements.txt",
+    "pip3 install --break-system-packages -r requirements.txt",
     "cd frontend && npm install"
 ]
 
@@ -13,4 +14,4 @@ cmds = [
 ]
 
 [start]
-cmd = "cd src && python app.py"
+cmd = "cd src && python3 app.py"
