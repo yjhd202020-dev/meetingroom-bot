@@ -80,3 +80,4 @@ meetingroom/
 - **프레임워크**: slack-bolt (Socket Mode)
 - **데이터베이스**: SQLite
 - **배포**: (향후 추가)
+# Trigger redeploy
