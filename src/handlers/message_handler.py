@@ -1,14 +1,18 @@
 """
 Slack message event handlers.
 """
+import os
 from slack_bolt import App
 from utils.nlp_parser import IntentParser
 from services.reservation_service import ReservationService
 
+# 웹 캘린더 URL
+WEB_URL = os.environ.get("WEB_URL", "")
+
 
 def get_help_message() -> str:
     """Return comprehensive help message."""
-    return """안녕하세요!! 저 위저드예요~ 회의실 예약 도와드릴게요! 🙋‍♀️
+    msg = """안녕하세요!! 저 위저드예요~ 회의실 예약 도와드릴게요! 🙋‍♀️
 
 *🏢 회의실은요~*
 Delhi(델리), Mumbai(뭄바이), Chennai(첸나이) 이렇게 3개 있어요!
@@ -32,6 +36,11 @@ Delhi(델리), Mumbai(뭄바이), Chennai(첸나이) 이렇게 3개 있어요!
 
 아 그리고 그냥 아무 얘기나 해도 돼요!!
 심심하면 말 걸어주세요 ㅋㅋㅋ 😊"""
+
+    if WEB_URL:
+        msg += f"\n\n*📊 웹 캘린더*\n한눈에 보려면 여기로~: {WEB_URL}"
+
+    return msg
 
 
 def get_user_display_name(client, user_id: str) -> str:
@@ -62,10 +71,14 @@ def handle_intent(parsed: dict, user_id: str, user_name: str, reservation_servic
 
     elif intent == 'status':
         status = reservation_service.get_weekly_status(parsed['week_offset'])
+        if WEB_URL:
+            status += f"\n\n📊 캘린더로 보기: {WEB_URL}"
         say(status)
 
     elif intent == 'all_reservations':
         status = reservation_service.get_all_reservations()
+        if WEB_URL:
+            status += f"\n\n📊 캘린더로 보기: {WEB_URL}"
         say(status)
 
     elif intent == 'my_reservations':
