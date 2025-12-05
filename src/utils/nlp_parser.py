@@ -63,11 +63,13 @@ Next week dates:
 Available rooms: Delhi, Mumbai, Chennai (뭄바이=Mumbai, 델리=Delhi, 첸나이=Chennai)
 
 === INTENT TYPES ===
-1. "reserve" - User wants to make a reservation
-2. "cancel" - User wants to cancel a reservation
-3. "status" - User wants to see reservation status
-4. "my_reservations" - User wants to see their own reservations
+1. "reserve" - User wants to make a reservation (예약, 잡아줘, 예약해줘)
+2. "cancel" - User wants to cancel a reservation (취소, 삭제, 예약 취소하고 싶어, 취소하고 싶어)
+3. "status" - User wants to see all reservation status (전체 예약, 예약 현황, 이번주/다음주 예약)
+4. "my_reservations" - User wants to see ONLY their own reservations (내 예약, 나의 예약)
 5. "unknown" - Cannot determine intent
+
+IMPORTANT: "취소" keyword = always "cancel" intent, even without reservation number
 
 === TIME PARSING RULES ===
 - "오전" = AM (before 12:00)
