@@ -183,3 +183,66 @@ class Database:
         conn.close()
 
         return [dict(row) for row in rows]
+
+    def get_user_reservations(self, slack_user_id: str) -> List[Dict]:
+        """Get all future reservations for a specific user."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        now = datetime.now()
+        cursor.execute("""
+            SELECT r.*, rm.name as room_name
+            FROM reservations r
+            JOIN rooms rm ON r.room_id = rm.id
+            WHERE r.slack_user_id = ? AND r.end_time > ?
+            ORDER BY r.start_time
+        """, (slack_user_id, now))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def delete_reservation(self, reservation_id: int, slack_user_id: str) -> bool:
+        """
+        Delete a reservation by ID.
+        Only allows deletion by the user who created it.
+        Returns True if successful, False otherwise.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            # Verify ownership and delete
+            cursor.execute("""
+                DELETE FROM reservations
+                WHERE id = ? AND slack_user_id = ?
+            """, (reservation_id, slack_user_id))
+
+            conn.commit()
+            deleted = cursor.rowcount > 0
+            conn.close()
+            return deleted
+        except Exception as e:
+            conn.close()
+            print(f"Error deleting reservation: {e}")
+            return False
+
+    def get_reservation_by_id(self, reservation_id: int) -> Optional[Dict]:
+        """Get a reservation by ID."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT r.*, rm.name as room_name
+            FROM reservations r
+            JOIN rooms rm ON r.room_id = rm.id
+            WHERE r.id = ?
+        """, (reservation_id,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return dict(row)
+        return None

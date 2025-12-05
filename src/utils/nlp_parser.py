@@ -136,3 +136,33 @@ def is_status_request(text: str) -> bool:
 
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in status_keywords)
+
+
+def is_cancel_request(text: str) -> bool:
+    """Check if the message is requesting to cancel a reservation."""
+    cancel_keywords = [
+        '취소',
+        '삭제',
+        '예약 취소',
+        '취소해',
+        '삭제해',
+        'cancel',
+        'delete reservation'
+    ]
+
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in cancel_keywords)
+
+
+def is_my_reservations_request(text: str) -> bool:
+    """Check if the message is requesting user's own reservations."""
+    my_keywords = [
+        '내 예약',
+        '나의 예약',
+        '제 예약',
+        'my reservation',
+        'my booking'
+    ]
+
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in my_keywords)

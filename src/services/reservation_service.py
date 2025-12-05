@@ -152,3 +152,71 @@ class ReservationService:
 📅 날짜: {existing_start.strftime('%Y년 %m월 %d일')} ({weekday})
 🕐 시간: {existing_start.strftime('%H:%M')} ~ {existing_end.strftime('%H:%M')}
 👤 예약자: <@{conflict['slack_user_id']}>"""
+
+    def get_user_reservations(self, slack_user_id: str) -> Dict:
+        """Get user's upcoming reservations with formatted message."""
+        reservations = self.db.get_user_reservations(slack_user_id)
+
+        if not reservations:
+            return {
+                'success': True,
+                'message': "📭 예약된 회의실이 없습니다.",
+                'reservations': []
+            }
+
+        message = "📋 *내 예약 목록*\n\n"
+        for res in reservations:
+            start = datetime.fromisoformat(res['start_time'])
+            end = datetime.fromisoformat(res['end_time'])
+            weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+
+            message += f"*[{res['id']}]* 🏢 {res['room_name']}\n"
+            message += f"   📅 {start.strftime('%m/%d')} ({weekday}) {start.strftime('%H:%M')}-{end.strftime('%H:%M')}\n\n"
+
+        message += "_취소하려면: `@봇 [번호] 취소` (예: `@봇 5 취소`)_"
+
+        return {
+            'success': True,
+            'message': message,
+            'reservations': reservations
+        }
+
+    def cancel_reservation(self, reservation_id: int, slack_user_id: str) -> Dict:
+        """Cancel a reservation by ID."""
+        # Get reservation info first
+        reservation = self.db.get_reservation_by_id(reservation_id)
+
+        if not reservation:
+            return {
+                'success': False,
+                'message': f"❌ 예약 번호 {reservation_id}를 찾을 수 없습니다."
+            }
+
+        # Check ownership
+        if reservation['slack_user_id'] != slack_user_id:
+            return {
+                'success': False,
+                'message': "❌ 본인의 예약만 취소할 수 있습니다."
+            }
+
+        # Delete reservation
+        deleted = self.db.delete_reservation(reservation_id, slack_user_id)
+
+        if deleted:
+            start = datetime.fromisoformat(reservation['start_time'])
+            end = datetime.fromisoformat(reservation['end_time'])
+            weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+
+            return {
+                'success': True,
+                'message': f"""✅ *예약이 취소되었습니다*
+
+🏢 회의실: *{reservation['room_name']}*
+📅 날짜: {start.strftime('%Y년 %m월 %d일')} ({weekday})
+🕐 시간: {start.strftime('%H:%M')} ~ {end.strftime('%H:%M')}"""
+            }
+        else:
+            return {
+                'success': False,
+                'message': "❌ 예약 취소 중 오류가 발생했습니다."
+            }

@@ -1,8 +1,9 @@
 """
 Slack message event handlers.
 """
+import re
 from slack_bolt import App
-from utils.nlp_parser import ReservationParser, is_status_request
+from utils.nlp_parser import ReservationParser, is_status_request, is_cancel_request, is_my_reservations_request
 from services.reservation_service import ReservationService
 
 
@@ -19,6 +20,25 @@ def get_user_display_name(client, user_id: str) -> str:
     except Exception as e:
         print(f"Error fetching user info: {e}")
     return "Unknown"
+
+
+def extract_reservation_id(text: str) -> int | None:
+    """Extract reservation ID from cancel request text."""
+    # Pattern: "5 취소", "5번 취소", "#5 취소", "예약 5 취소"
+    patterns = [
+        r'(\d+)\s*번?\s*취소',
+        r'#(\d+)\s*취소',
+        r'취소\s*(\d+)',
+        r'cancel\s*(\d+)',
+        r'(\d+)\s*cancel',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+    return None
 
 
 def register_message_handlers(app: App, reservation_service: ReservationService):
@@ -47,6 +67,29 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
             say(status)
             return
 
+        # Check if my reservations request
+        if is_my_reservations_request(clean_text):
+            result = reservation_service.get_user_reservations(user_id)
+            say(result['message'])
+            return
+
+        # Check if cancel request
+        if is_cancel_request(clean_text):
+            reservation_id = extract_reservation_id(clean_text)
+
+            if reservation_id:
+                # Cancel specific reservation
+                result = reservation_service.cancel_reservation(reservation_id, user_id)
+                say(result['message'])
+            else:
+                # Show user's reservations to help them cancel
+                result = reservation_service.get_user_reservations(user_id)
+                if result['reservations']:
+                    say(result['message'])
+                else:
+                    say("📭 취소할 예약이 없습니다.")
+            return
+
         # Try to parse reservation request
         parsed = parser.parse(clean_text)
 
@@ -58,7 +101,10 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
                 "• `@봇 내일 오전 10시~12시 Mumbai`\n"
                 "• `@봇 12월 10일 14:00-16:00 Chennai`\n\n"
                 "*예약 현황 확인:*\n"
-                "• `@봇 전체 예약 현황`"
+                "• `@봇 전체 예약 현황`\n"
+                "• `@봇 내 예약`\n\n"
+                "*예약 취소:*\n"
+                "• `@봇 내 예약` → `@봇 [번호] 취소`"
             )
             return
 
@@ -95,6 +141,27 @@ def register_message_handlers(app: App, reservation_service: ReservationService)
         if is_status_request(text):
             status = reservation_service.get_weekly_status()
             say(status)
+            return
+
+        # Check if my reservations request
+        if is_my_reservations_request(text):
+            result = reservation_service.get_user_reservations(user_id)
+            say(result['message'])
+            return
+
+        # Check if cancel request
+        if is_cancel_request(text):
+            reservation_id = extract_reservation_id(text)
+
+            if reservation_id:
+                result = reservation_service.cancel_reservation(reservation_id, user_id)
+                say(result['message'])
+            else:
+                result = reservation_service.get_user_reservations(user_id)
+                if result['reservations']:
+                    say(result['message'])
+                else:
+                    say("📭 취소할 예약이 없습니다.")
             return
 
         # Try to parse reservation request
