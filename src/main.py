@@ -38,6 +38,48 @@ def run_slack_bot():
     reservation_service = ReservationService(db)
     register_message_handlers(app, reservation_service)
 
+    # App Home tab
+    @app.event("app_home_opened")
+    def update_home_tab(client, event, logger):
+        """Update the App Home tab when user opens it."""
+        try:
+            client.views_publish(
+                user_id=event["user"],
+                view={
+                    "type": "home",
+                    "blocks": [
+                        {
+                            "type": "header",
+                            "text": {"type": "plain_text", "text": "🏢 회의실 예약 시스템"}
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "*안녕하세요! 저는 위저드예요~* 🙋‍♀️\n회의실 예약 도와드릴게요!"
+                            }
+                        },
+                        {"type": "divider"},
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "*🏢 회의실*\nDelhi(델리) | Mumbai(뭄바이) | Chennai(첸나이)"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "*💬 사용법*\n그냥 편하게 말 걸어주세요!\n\n• `내일 3시~5시 델리 잡아줘`\n• `매주 금요일 16~18시 뭄바이`\n• `이번주 예약 뭐 있어?`"
+                            }
+                        }
+                    ]
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error updating home tab: {e}")
+
     print("🤖 Starting Slack bot...")
     handler = SocketModeHandler(app, SLACK_APP_TOKEN)
     handler.start()
