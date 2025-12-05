@@ -69,12 +69,16 @@ class ReservationService:
                 'message': "❌ 예약 중 오류가 발생했습니다. 다시 시도해주세요."
             }
 
-    def get_weekly_status(self) -> str:
-        """Get formatted weekly reservation status."""
+    def get_weekly_status(self, week_offset: int = 0) -> str:
+        """Get formatted weekly reservation status.
+
+        Args:
+            week_offset: 0 = this week, 1 = next week, -1 = last week
+        """
         # Get start of current week (Monday)
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         days_since_monday = today.weekday()
-        week_start = today - timedelta(days=days_since_monday)
+        week_start = today - timedelta(days=days_since_monday) + timedelta(weeks=week_offset)
 
         # Get all reservations for this week
         reservations = self.db.get_weekly_reservations(week_start)
@@ -89,7 +93,8 @@ class ReservationService:
 
         # Format message
         week_end = week_start + timedelta(days=6)
-        message = f"📅 이번 주 회의실 예약 현황 ({week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')})\n\n"
+        week_label = {-1: "지난 주", 0: "이번 주", 1: "다음 주"}.get(week_offset, "")
+        message = f"📅 {week_label} 회의실 예약 현황 ({week_start.strftime('%Y-%m-%d')} ~ {week_end.strftime('%Y-%m-%d')})\n\n"
 
         for room in rooms:
             room_name = room['name']

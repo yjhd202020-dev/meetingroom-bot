@@ -1,6 +1,6 @@
 """
 Natural language parser for meeting room reservation requests.
-Uses OpenAI API for accurate Korean/English natural language understanding.
+Uses OpenAI API for all intent detection and parsing.
 """
 import os
 import json
@@ -9,60 +9,84 @@ from typing import Optional
 from openai import OpenAI
 
 
-class ReservationParser:
-    """Parse natural language reservation requests using OpenAI."""
+class IntentParser:
+    """Parse all user intents using OpenAI."""
 
     ROOM_NAMES = ["Delhi", "Mumbai", "Chennai"]
 
     def __init__(self):
         self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-        self.now = datetime.now()
 
-    def parse(self, text: str) -> Optional[dict]:
+    def parse(self, text: str) -> dict:
         """
-        Parse reservation request from natural language using OpenAI.
+        Parse user intent and extract all relevant information using OpenAI.
 
         Returns:
             {
-                'room_name': str,
-                'start_time': datetime,
-                'end_time': datetime
+                'intent': 'reserve' | 'cancel' | 'status' | 'my_reservations' | 'unknown',
+                'room_name': str | None,
+                'start_time': datetime | None,
+                'end_time': datetime | None,
+                'reservation_id': int | None,
+                'week_offset': int (0=this week, 1=next week, -1=last week)
             }
-            or None if parsing fails
         """
-        today = self.now.strftime("%Y-%m-%d")
-        current_time = self.now.strftime("%H:%M")
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        current_time = now.strftime("%H:%M")
+        current_weekday = ['월', '화', '수', '목', '금', '토', '일'][now.weekday()]
 
-        system_prompt = f"""You are a meeting room reservation parser. Extract reservation details from Korean or English text.
+        # Calculate next Monday for reference
+        days_until_monday = (7 - now.weekday()) % 7
+        if days_until_monday == 0:
+            days_until_monday = 7
+        next_monday = (now + timedelta(days=days_until_monday)).strftime("%Y-%m-%d")
 
+        system_prompt = f"""You are a meeting room reservation assistant. Analyze user messages and extract intent and details.
+
+Current date/time: {today} ({current_weekday}) {current_time}
+Next Monday: {next_monday}
 Available rooms: Delhi, Mumbai, Chennai
 
-Current date and time: {today} {current_time}
+INTENT TYPES:
+1. "reserve" - User wants to make a reservation
+2. "cancel" - User wants to cancel a reservation
+3. "status" - User wants to see reservation status (전체 예약, 예약 현황, 이번주/다음주 예약 등)
+4. "my_reservations" - User wants to see their own reservations (내 예약, 나의 예약)
+5. "unknown" - Cannot determine intent
 
-IMPORTANT TIME PARSING RULES:
-- "오전" means AM (before noon)
-- "오후" means PM (afternoon/evening)
-- "오후 6시" = 18:00
-- "오후 6시~8시" = 18:00~20:00 (both times are PM when 오후 is used once)
-- If no AM/PM specified and hour ≤ 6, assume PM for typical work hours
-- "내일" = tomorrow
-- "모레" = day after tomorrow
+TIME PARSING RULES:
+- "오전" = AM, "오후" = PM
+- "오후 6시~8시" = 18:00~20:00 (BOTH times are PM)
+- "내일" = tomorrow, "모레" = day after tomorrow
+- "다음주 화요일" = next week Tuesday
+- "다음주" in status request = week_offset: 1
+- "이번주" or no week mention = week_offset: 0
+- "지난주" = week_offset: -1
+
+CANCEL PARSING:
+- "5번 취소", "5 취소", "#5 취소" → reservation_id: 5
+- Just "취소" without number → reservation_id: null (will show list)
 
 Return JSON only:
 {{
-    "room_name": "Delhi|Mumbai|Chennai or null if not found",
-    "date": "YYYY-MM-DD",
-    "start_hour": 0-23,
-    "start_minute": 0-59,
-    "end_hour": 0-23,
-    "end_minute": 0-59,
-    "error": "error message if parsing fails, null otherwise"
+    "intent": "reserve|cancel|status|my_reservations|unknown",
+    "room_name": "Delhi|Mumbai|Chennai|null",
+    "date": "YYYY-MM-DD or null",
+    "start_hour": 0-23 or null,
+    "start_minute": 0-59 or null,
+    "end_hour": 0-23 or null,
+    "end_minute": 0-59 or null,
+    "reservation_id": number or null,
+    "week_offset": 0 or 1 or -1
 }}
 
 Examples:
-- "오후 6시~8시 Mumbai" → {{"room_name": "Mumbai", "date": "{today}", "start_hour": 18, "start_minute": 0, "end_hour": 20, "end_minute": 0, "error": null}}
-- "내일 오전 10시~12시 Delhi" → {{"room_name": "Delhi", "date": "(tomorrow's date)", "start_hour": 10, "start_minute": 0, "end_hour": 12, "end_minute": 0, "error": null}}
-- "14:00-16:00 Chennai" → {{"room_name": "Chennai", "date": "{today}", "start_hour": 14, "start_minute": 0, "end_hour": 16, "end_minute": 0, "error": null}}
+- "오후 6시~8시 Mumbai 예약" → {{"intent": "reserve", "room_name": "Mumbai", "date": "{today}", "start_hour": 18, "start_minute": 0, "end_hour": 20, "end_minute": 0, "reservation_id": null, "week_offset": 0}}
+- "다음주 화요일 오전 10시~오후 2시 뭄바이" → {{"intent": "reserve", "room_name": "Mumbai", "date": "(next Tuesday)", "start_hour": 10, "start_minute": 0, "end_hour": 14, "end_minute": 0, "reservation_id": null, "week_offset": 0}}
+- "다음주 예약 현황" → {{"intent": "status", "room_name": null, "date": null, "start_hour": null, "start_minute": null, "end_hour": null, "end_minute": null, "reservation_id": null, "week_offset": 1}}
+- "5번 취소해줘" → {{"intent": "cancel", "room_name": null, "date": null, "start_hour": null, "start_minute": null, "end_hour": null, "end_minute": null, "reservation_id": 5, "week_offset": 0}}
+- "내 예약 보여줘" → {{"intent": "my_reservations", "room_name": null, "date": null, "start_hour": null, "start_minute": null, "end_hour": null, "end_minute": null, "reservation_id": null, "week_offset": 0}}
 """
 
         try:
@@ -78,91 +102,37 @@ Examples:
 
             result = json.loads(response.choices[0].message.content)
 
-            # Validate and convert to datetime
-            if result.get("error") or not result.get("room_name"):
-                return None
-
-            room_name = result["room_name"]
-            if room_name not in self.ROOM_NAMES:
-                return None
-
-            # Parse date
-            date_str = result.get("date", today)
-            try:
-                date = datetime.strptime(date_str, "%Y-%m-%d")
-            except ValueError:
-                date = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-            # Build datetime objects
-            start_time = date.replace(
-                hour=result["start_hour"],
-                minute=result["start_minute"],
-                second=0,
-                microsecond=0
-            )
-            end_time = date.replace(
-                hour=result["end_hour"],
-                minute=result["end_minute"],
-                second=0,
-                microsecond=0
-            )
-
-            # Validation
-            if start_time >= end_time:
-                return None
-
-            return {
-                'room_name': room_name,
-                'start_time': start_time,
-                'end_time': end_time
+            # Build response
+            parsed = {
+                'intent': result.get('intent', 'unknown'),
+                'room_name': result.get('room_name'),
+                'start_time': None,
+                'end_time': None,
+                'reservation_id': result.get('reservation_id'),
+                'week_offset': result.get('week_offset', 0)
             }
+
+            # Parse datetime if reservation intent
+            if parsed['intent'] == 'reserve' and result.get('date') and result.get('start_hour') is not None:
+                try:
+                    date = datetime.strptime(result['date'], "%Y-%m-%d")
+                    parsed['start_time'] = date.replace(
+                        hour=result['start_hour'],
+                        minute=result.get('start_minute', 0),
+                        second=0,
+                        microsecond=0
+                    )
+                    parsed['end_time'] = date.replace(
+                        hour=result['end_hour'],
+                        minute=result.get('end_minute', 0),
+                        second=0,
+                        microsecond=0
+                    )
+                except (ValueError, KeyError):
+                    parsed['intent'] = 'unknown'
+
+            return parsed
 
         except Exception as e:
             print(f"OpenAI parsing error: {e}")
-            return None
-
-
-def is_status_request(text: str) -> bool:
-    """Check if the message is requesting reservation status."""
-    status_keywords = [
-        '전체 예약',
-        '예약 현황',
-        '이번주',
-        '예약 목록',
-        'reservation status',
-        'show reservations',
-        'list reservations'
-    ]
-
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in status_keywords)
-
-
-def is_cancel_request(text: str) -> bool:
-    """Check if the message is requesting to cancel a reservation."""
-    cancel_keywords = [
-        '취소',
-        '삭제',
-        '예약 취소',
-        '취소해',
-        '삭제해',
-        'cancel',
-        'delete reservation'
-    ]
-
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in cancel_keywords)
-
-
-def is_my_reservations_request(text: str) -> bool:
-    """Check if the message is requesting user's own reservations."""
-    my_keywords = [
-        '내 예약',
-        '나의 예약',
-        '제 예약',
-        'my reservation',
-        'my booking'
-    ]
-
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in my_keywords)
+            return {'intent': 'unknown', 'room_name': None, 'start_time': None, 'end_time': None, 'reservation_id': None, 'week_offset': 0}
