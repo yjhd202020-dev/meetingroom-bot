@@ -2,8 +2,8 @@
 Slack message event handlers.
 """
 from slack_bolt import App
-from src.utils.nlp_parser import ReservationParser, is_status_request
-from src.services.reservation_service import ReservationService
+from utils.nlp_parser import ReservationParser, is_status_request
+from services.reservation_service import ReservationService
 
 
 def register_message_handlers(app: App, reservation_service: ReservationService):
