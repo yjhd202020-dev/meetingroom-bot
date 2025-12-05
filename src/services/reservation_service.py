@@ -3,7 +3,7 @@ Business logic for meeting room reservations.
 """
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
-from src.models.database import Database
+from models.database import Database
 
 
 class ReservationService:
