@@ -12,12 +12,27 @@ Slack에서 자연어로 회의실을 예약하고 관리하는 봇입니다.
 2. 중복 예약 방지 및 알림
 3. 일주일치 전체 예약 현황 조회
 
-## 🚀 로컬 개발 시작하기
+## 🚀 배포 정보
+
+### 프로덕션 환경
+- **플랫폼**: Railway
+- **상태**: ✅ 운영 중
+- **Slack App**: meetingroom wizard (Balance Hero 워크스페이스)
+
+### 환경변수 (Railway)
+| 변수명 | 설명 |
+|--------|------|
+| `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`) |
+| `SLACK_APP_TOKEN` | App-Level Token (`xapp-...`) |
+| `SLACK_SIGNING_SECRET` | Signing Secret |
+| `DATABASE_PATH` | SQLite DB 경로 |
+
+## 🛠️ 로컬 개발
 
 ### 1. 환경 설정
 ```bash
 # 프로젝트 디렉토리로 이동
-cd mike.kwon/meetingroom
+cd meetingroom-bot
 
 # 의존성 설치
 uv sync
@@ -37,27 +52,27 @@ uv run python scripts/init_db.py
 
 ### 4. 봇 실행 (Socket Mode)
 ```bash
-uv run python src/app.py
+cd src && uv run python app.py
 ```
 
 ## 📋 사용 예시
 
 ### 예약하기
 ```
-오후 4:00~6:00 Delhi 예약해줘
-내일 오전 10시부터 12시까지 Mumbai 예약
-12월 10일 오후 2시~4시 Chennai
+@meetingroom wizard 오후 4:00~6:00 Delhi 예약해줘
+@meetingroom wizard 내일 오전 10시부터 12시까지 Mumbai 예약
+@meetingroom wizard 12월 10일 오후 2시~4시 Chennai
 ```
 
 ### 예약 현황 보기
 ```
-전체 예약 현황
-이번주 예약
+@meetingroom wizard 전체 예약 현황
+@meetingroom wizard 이번주 예약
 ```
 
 ## 🏗️ 프로젝트 구조
 ```
-meetingroom/
+meetingroom-bot/
 ├── src/
 │   ├── app.py              # 메인 봇 애플리케이션
 │   ├── handlers/           # Slack 이벤트 핸들러
@@ -67,17 +82,27 @@ meetingroom/
 ├── scripts/                # 초기화 스크립트
 ├── config/                 # 설정 파일
 ├── data/                   # SQLite DB 저장 위치
-└── docs/                   # 문서
+├── docs/                   # 문서
+├── Procfile                # Railway 실행 명령어
+├── requirements.txt        # 의존성 목록
+└── runtime.txt             # Python 버전
 ```
 
 ## 🔒 보안
 - `.env` 파일은 절대 커밋하지 마세요
 - Slack 토큰은 안전하게 보관하세요
-- 프로덕션 배포 시 GitHub Secrets 사용
+- 프로덕션: Railway Variables에서 환경변수 관리
 
 ## 📚 기술 스택
 - **언어**: Python 3.10+
 - **프레임워크**: slack-bolt (Socket Mode)
 - **데이터베이스**: SQLite
-- **배포**: (향후 추가)
-# Trigger redeploy
+- **배포**: Railway
+
+## 📦 GitHub Repository
+- https://github.com/yjhd202020-dev/meetingroom-bot
+
+---
+
+**배포일**: 2025-12-05
+**개발자**: Mike Kwon
