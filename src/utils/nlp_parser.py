@@ -20,53 +20,65 @@ class IntentParser:
     def parse(self, text: str) -> dict:
         """
         Parse user intent and extract all relevant information using OpenAI.
-
-        Returns:
-            {
-                'intent': 'reserve' | 'cancel' | 'status' | 'my_reservations' | 'unknown',
-                'room_name': str | None,
-                'start_time': datetime | None,
-                'end_time': datetime | None,
-                'reservation_id': int | None,
-                'week_offset': int (0=this week, 1=next week, -1=last week)
-            }
         """
         now = datetime.now()
         today = now.strftime("%Y-%m-%d")
         current_time = now.strftime("%H:%M")
-        current_weekday = ['월', '화', '수', '목', '금', '토', '일'][now.weekday()]
+        weekday_names = ['월', '화', '수', '목', '금', '토', '일']
+        current_weekday = weekday_names[now.weekday()]
 
-        # Calculate next Monday for reference
-        days_until_monday = (7 - now.weekday()) % 7
-        if days_until_monday == 0:
-            days_until_monday = 7
-        next_monday = (now + timedelta(days=days_until_monday)).strftime("%Y-%m-%d")
+        # Calculate key dates
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        day_after = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+
+        # Calculate this week's dates (Mon-Sun)
+        days_since_monday = now.weekday()
+        this_monday = now - timedelta(days=days_since_monday)
+        this_week_dates = {}
+        for i, day in enumerate(weekday_names):
+            date = (this_monday + timedelta(days=i)).strftime("%Y-%m-%d")
+            this_week_dates[f"이번주 {day}요일"] = date
+
+        # Calculate next week's dates (Mon-Sun)
+        next_monday = this_monday + timedelta(weeks=1)
+        next_week_dates = {}
+        for i, day in enumerate(weekday_names):
+            date = (next_monday + timedelta(days=i)).strftime("%Y-%m-%d")
+            next_week_dates[f"다음주 {day}요일"] = date
 
         system_prompt = f"""You are a meeting room reservation assistant. Analyze user messages and extract intent and details.
 
-Current date/time: {today} ({current_weekday}) {current_time}
-Next Monday: {next_monday}
-Available rooms: Delhi, Mumbai, Chennai
+=== CRITICAL DATE INFORMATION ===
+Today: {today} ({current_weekday}요일)
+Current time: {current_time}
+Tomorrow (내일): {tomorrow}
+Day after tomorrow (모레): {day_after}
 
-INTENT TYPES:
+This week dates:
+{chr(10).join(f"- {k}: {v}" for k, v in this_week_dates.items())}
+
+Next week dates:
+{chr(10).join(f"- {k}: {v}" for k, v in next_week_dates.items())}
+
+Available rooms: Delhi, Mumbai, Chennai (뭄바이=Mumbai, 델리=Delhi, 첸나이=Chennai)
+
+=== INTENT TYPES ===
 1. "reserve" - User wants to make a reservation
 2. "cancel" - User wants to cancel a reservation
-3. "status" - User wants to see reservation status (전체 예약, 예약 현황, 이번주/다음주 예약 등)
-4. "my_reservations" - User wants to see their own reservations (내 예약, 나의 예약)
+3. "status" - User wants to see reservation status
+4. "my_reservations" - User wants to see their own reservations
 5. "unknown" - Cannot determine intent
 
-TIME PARSING RULES:
-- "오전" = AM, "오후" = PM
-- "오후 6시~8시" = 18:00~20:00 (BOTH times are PM)
-- "내일" = tomorrow, "모레" = day after tomorrow
-- "다음주 화요일" = next week Tuesday
-- "다음주" in status request = week_offset: 1
-- "이번주" or no week mention = week_offset: 0
-- "지난주" = week_offset: -1
+=== TIME PARSING RULES ===
+- "오전" = AM (before 12:00)
+- "오후" = PM (12:00 or after)
+- "오후 6시~8시" = 18:00~20:00 (BOTH times are PM when only one 오후 is mentioned)
+- "10~2시" or "10시~2시" without AM/PM = 10:00~14:00 (assume crossing noon)
+- If only one time has AM/PM, apply it contextually
 
-CANCEL PARSING:
-- "5번 취소", "5 취소", "#5 취소" → reservation_id: 5
-- Just "취소" without number → reservation_id: null (will show list)
+=== CANCEL PARSING ===
+- "5번 취소", "5 취소" → reservation_id: 5
+- Just "취소" without number → reservation_id: null
 
 Return JSON only:
 {{
@@ -79,15 +91,7 @@ Return JSON only:
     "end_minute": 0-59 or null,
     "reservation_id": number or null,
     "week_offset": 0 or 1 or -1
-}}
-
-Examples:
-- "오후 6시~8시 Mumbai 예약" → {{"intent": "reserve", "room_name": "Mumbai", "date": "{today}", "start_hour": 18, "start_minute": 0, "end_hour": 20, "end_minute": 0, "reservation_id": null, "week_offset": 0}}
-- "다음주 화요일 오전 10시~오후 2시 뭄바이" → {{"intent": "reserve", "room_name": "Mumbai", "date": "(next Tuesday)", "start_hour": 10, "start_minute": 0, "end_hour": 14, "end_minute": 0, "reservation_id": null, "week_offset": 0}}
-- "다음주 예약 현황" → {{"intent": "status", "room_name": null, "date": null, "start_hour": null, "start_minute": null, "end_hour": null, "end_minute": null, "reservation_id": null, "week_offset": 1}}
-- "5번 취소해줘" → {{"intent": "cancel", "room_name": null, "date": null, "start_hour": null, "start_minute": null, "end_hour": null, "end_minute": null, "reservation_id": 5, "week_offset": 0}}
-- "내 예약 보여줘" → {{"intent": "my_reservations", "room_name": null, "date": null, "start_hour": null, "start_minute": null, "end_hour": null, "end_minute": null, "reservation_id": null, "week_offset": 0}}
-"""
+}}"""
 
         try:
             response = self.client.chat.completions.create(
@@ -102,7 +106,6 @@ Examples:
 
             result = json.loads(response.choices[0].message.content)
 
-            # Build response
             parsed = {
                 'intent': result.get('intent', 'unknown'),
                 'room_name': result.get('room_name'),
@@ -112,7 +115,6 @@ Examples:
                 'week_offset': result.get('week_offset', 0)
             }
 
-            # Parse datetime if reservation intent
             if parsed['intent'] == 'reserve' and result.get('date') and result.get('start_hour') is not None:
                 try:
                     date = datetime.strptime(result['date'], "%Y-%m-%d")
