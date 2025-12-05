@@ -388,5 +388,5 @@ class IntentParser:
         try:
             date = datetime.strptime(date_str, "%Y-%m-%d")
             return date.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        except:
+        except (ValueError, TypeError):
             return None

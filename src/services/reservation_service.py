@@ -2,8 +2,23 @@
 Business logic for meeting room reservations.
 """
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union
 from models.database import Database
+
+# Weekday names in Korean - shared constant to avoid duplication
+WEEKDAY_NAMES_KR = ['월', '화', '수', '목', '금', '토', '일']
+
+
+def get_weekday_kr(dt: datetime) -> str:
+    """Get Korean weekday name from datetime."""
+    return WEEKDAY_NAMES_KR[dt.weekday()]
+
+
+def parse_datetime(dt: Union[str, datetime]) -> datetime:
+    """Parse datetime from string if needed."""
+    if isinstance(dt, str):
+        return datetime.fromisoformat(dt)
+    return dt
 
 
 class ReservationService:
@@ -104,11 +119,10 @@ class ReservationService:
 
             if room_reservations:
                 for res in room_reservations:
-                    start = datetime.fromisoformat(res['start_time'])
-                    end = datetime.fromisoformat(res['end_time'])
-                    weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+                    start = parse_datetime(res['start_time'])
+                    end = parse_datetime(res['end_time'])
 
-                    message += f"   • {start.strftime('%m/%d')} ({weekday}) "
+                    message += f"   • {start.strftime('%m/%d')} ({get_weekday_kr(start)}) "
                     message += f"{start.strftime('%H:%M')}-{end.strftime('%H:%M')} "
                     message += f"| <@{res['slack_user_id']}>\n"
             else:
@@ -126,12 +140,10 @@ class ReservationService:
         username: str
     ) -> str:
         """Format successful reservation message."""
-        weekday = ['월', '화', '수', '목', '금', '토', '일'][start_time.weekday()]
-
         return f"""✅ *예약 완료!*
 
 🏢 회의실: *{room_name}*
-📅 날짜: {start_time.strftime('%Y년 %m월 %d일')} ({weekday})
+📅 날짜: {start_time.strftime('%Y년 %m월 %d일')} ({get_weekday_kr(start_time)})
 🕐 시간: {start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')}
 👤 예약자: {username}"""
 
@@ -143,9 +155,8 @@ class ReservationService:
         conflict: dict
     ) -> str:
         """Format conflict error message."""
-        existing_start = datetime.fromisoformat(conflict['start_time'])
-        existing_end = datetime.fromisoformat(conflict['end_time'])
-        weekday = ['월', '화', '수', '목', '금', '토', '일'][existing_start.weekday()]
+        existing_start = parse_datetime(conflict['start_time'])
+        existing_end = parse_datetime(conflict['end_time'])
 
         return f"""❌ *예약 불가*
 
@@ -154,7 +165,7 @@ class ReservationService:
 ⚠️ 이유: 해당 시간에 이미 예약이 있습니다.
 
 *기존 예약 정보:*
-📅 날짜: {existing_start.strftime('%Y년 %m월 %d일')} ({weekday})
+📅 날짜: {existing_start.strftime('%Y년 %m월 %d일')} ({get_weekday_kr(existing_start)})
 🕐 시간: {existing_start.strftime('%H:%M')} ~ {existing_end.strftime('%H:%M')}
 👤 예약자: <@{conflict['slack_user_id']}>"""
 
@@ -171,12 +182,11 @@ class ReservationService:
 
         message = "📋 *내 예약 목록*\n\n"
         for res in reservations:
-            start = datetime.fromisoformat(res['start_time'])
-            end = datetime.fromisoformat(res['end_time'])
-            weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+            start = parse_datetime(res['start_time'])
+            end = parse_datetime(res['end_time'])
 
             message += f"*[{res['id']}]* 🏢 {res['room_name']}\n"
-            message += f"   📅 {start.strftime('%m/%d')} ({weekday}) {start.strftime('%H:%M')}-{end.strftime('%H:%M')}\n\n"
+            message += f"   📅 {start.strftime('%m/%d')} ({get_weekday_kr(start)}) {start.strftime('%H:%M')}-{end.strftime('%H:%M')}\n\n"
 
         message += "_취소하려면: `@봇 [번호] 취소` (예: `@봇 5 취소`)_"
 
@@ -188,7 +198,6 @@ class ReservationService:
 
     def cancel_reservation(self, reservation_id: int, slack_user_id: str) -> Dict:
         """Cancel a reservation by ID."""
-        # Get reservation info first
         reservation = self.db.get_reservation_by_id(reservation_id)
 
         if not reservation:
@@ -197,34 +206,30 @@ class ReservationService:
                 'message': f"❌ 예약 번호 {reservation_id}를 찾을 수 없습니다."
             }
 
-        # Check ownership
         if reservation['slack_user_id'] != slack_user_id:
             return {
                 'success': False,
                 'message': "❌ 본인의 예약만 취소할 수 있습니다."
             }
 
-        # Delete reservation
         deleted = self.db.delete_reservation(reservation_id, slack_user_id)
 
         if deleted:
-            start = datetime.fromisoformat(reservation['start_time'])
-            end = datetime.fromisoformat(reservation['end_time'])
-            weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+            start = parse_datetime(reservation['start_time'])
+            end = parse_datetime(reservation['end_time'])
 
             return {
                 'success': True,
                 'message': f"""✅ *예약이 취소되었습니다*
 
 🏢 회의실: *{reservation['room_name']}*
-📅 날짜: {start.strftime('%Y년 %m월 %d일')} ({weekday})
+📅 날짜: {start.strftime('%Y년 %m월 %d일')} ({get_weekday_kr(start)})
 🕐 시간: {start.strftime('%H:%M')} ~ {end.strftime('%H:%M')}"""
             }
-        else:
-            return {
-                'success': False,
-                'message': "❌ 예약 취소 중 오류가 발생했습니다."
-            }
+        return {
+            'success': False,
+            'message': "❌ 예약 취소 중 오류가 발생했습니다."
+        }
 
     def get_all_reservations(self) -> str:
         """Get all future reservations formatted as message."""
@@ -236,9 +241,9 @@ class ReservationService:
         message = "📋 *전체 예약 현황*\n\n"
 
         # Group by date
-        by_date = {}
+        by_date: Dict[str, List] = {}
         for res in reservations:
-            start = datetime.fromisoformat(res['start_time']) if isinstance(res['start_time'], str) else res['start_time']
+            start = parse_datetime(res['start_time'])
             date_key = start.strftime('%Y-%m-%d')
             if date_key not in by_date:
                 by_date[date_key] = []
@@ -246,15 +251,13 @@ class ReservationService:
 
         for date_key in sorted(by_date.keys()):
             date_reservations = by_date[date_key]
-            first_res = date_reservations[0]
-            start = datetime.fromisoformat(first_res['start_time']) if isinstance(first_res['start_time'], str) else first_res['start_time']
-            weekday = ['월', '화', '수', '목', '금', '토', '일'][start.weekday()]
+            first_start = parse_datetime(date_reservations[0]['start_time'])
 
-            message += f"*📅 {start.strftime('%m/%d')} ({weekday})*\n"
+            message += f"*📅 {first_start.strftime('%m/%d')} ({get_weekday_kr(first_start)})*\n"
 
             for res in date_reservations:
-                res_start = datetime.fromisoformat(res['start_time']) if isinstance(res['start_time'], str) else res['start_time']
-                res_end = datetime.fromisoformat(res['end_time']) if isinstance(res['end_time'], str) else res['end_time']
+                res_start = parse_datetime(res['start_time'])
+                res_end = parse_datetime(res['end_time'])
                 message += f"   • {res['room_name']} {res_start.strftime('%H:%M')}-{res_end.strftime('%H:%M')} | <@{res['slack_user_id']}>\n"
 
             message += "\n"
@@ -274,8 +277,6 @@ class ReservationService:
         weeks: int = 4
     ) -> Dict:
         """Create recurring reservations for N weeks."""
-        weekday_names = ['월', '화', '수', '목', '금', '토', '일']
-
         room = self.db.get_room_by_name(room_name)
         if not room:
             return {
@@ -304,7 +305,7 @@ class ReservationService:
         message = f"""✅ *반복 예약 완료!*
 
 🏢 회의실: *{room_name}*
-📅 일정: 매주 {weekday_names[weekday]}요일
+📅 일정: 매주 {WEEKDAY_NAMES_KR[weekday]}요일
 🕐 시간: {start_hour:02d}:{start_minute:02d} ~ {end_hour:02d}:{end_minute:02d}
 🔁 생성된 예약: {len(created_ids)}건 ({weeks}주간)"""
 

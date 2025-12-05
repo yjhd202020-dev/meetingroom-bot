@@ -4,10 +4,13 @@ Supports both SQLite (local) and PostgreSQL (production).
 """
 import os
 import sqlite3
+import logging
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple, Generator, Any
 from pathlib import Path
-from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -21,22 +24,39 @@ class Database:
         if self.is_postgres:
             import psycopg2
             self.psycopg2 = psycopg2
-            print(f"📦 Using PostgreSQL database")
+            logger.info("📦 Using PostgreSQL database")
+            print("📦 Using PostgreSQL database")
         else:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            logger.info(f"📦 Using SQLite database: {db_path}")
             print(f"📦 Using SQLite database: {db_path}")
 
         self.init_db()
 
-    def get_connection(self):
+    def get_connection(self) -> Any:
         """Get database connection."""
         if self.is_postgres:
-            conn = self.psycopg2.connect(self.database_url)
-            return conn
+            return self.psycopg2.connect(self.database_url)
         else:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             return conn
+
+    @contextmanager
+    def get_cursor(self) -> Generator:
+        """Context manager for database cursor. Handles connection cleanup automatically."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            yield cursor
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Database error: {e}")
+            raise
+        finally:
+            cursor.close()
+            conn.close()
 
     def init_db(self):
         """Initialize database schema."""
@@ -141,37 +161,28 @@ class Database:
 
     def get_room_by_name(self, room_name: str) -> Optional[Dict]:
         """Get room by name (case-insensitive)."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        p = self._param()
-        cursor.execute(f"SELECT * FROM rooms WHERE LOWER(name) = LOWER({p})", (room_name,))
-        row = cursor.fetchone()
-        result = self._fetchone_dict(cursor, row)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            p = self._param()
+            cursor.execute(f"SELECT * FROM rooms WHERE LOWER(name) = LOWER({p})", (room_name,))
+            row = cursor.fetchone()
+            return self._fetchone_dict(cursor, row)
 
     def check_overlap(self, room_id: int, start_time: datetime, end_time: datetime) -> Optional[Dict]:
         """Check if there's an overlapping reservation."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        p = self._param()
-        cursor.execute(f"""
-            SELECT r.*, rm.name as room_name
-            FROM reservations r
-            JOIN rooms rm ON r.room_id = rm.id
-            WHERE r.room_id = {p}
-            AND r.start_time < {p}
-            AND r.end_time > {p}
-            ORDER BY r.start_time
-            LIMIT 1
-        """, (room_id, end_time, start_time))
-
-        row = cursor.fetchone()
-        result = self._fetchone_dict(cursor, row)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            p = self._param()
+            cursor.execute(f"""
+                SELECT r.*, rm.name as room_name
+                FROM reservations r
+                JOIN rooms rm ON r.room_id = rm.id
+                WHERE r.room_id = {p}
+                AND r.start_time < {p}
+                AND r.end_time > {p}
+                ORDER BY r.start_time
+                LIMIT 1
+            """, (room_id, end_time, start_time))
+            row = cursor.fetchone()
+            return self._fetchone_dict(cursor, row)
 
     def create_reservation(
         self,
@@ -186,33 +197,26 @@ class Database:
         if conflict:
             return None
 
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
         try:
-            p = self._param()
-            if self.is_postgres:
-                cursor.execute(f"""
-                    INSERT INTO reservations
-                    (room_id, slack_user_id, slack_username, start_time, end_time)
-                    VALUES ({p}, {p}, {p}, {p}, {p})
-                    RETURNING id
-                """, (room_id, slack_user_id, slack_username, start_time, end_time))
-                reservation_id = cursor.fetchone()[0]
-            else:
-                cursor.execute(f"""
-                    INSERT INTO reservations
-                    (room_id, slack_user_id, slack_username, start_time, end_time)
-                    VALUES ({p}, {p}, {p}, {p}, {p})
-                """, (room_id, slack_user_id, slack_username, start_time, end_time))
-                reservation_id = cursor.lastrowid
-
-            conn.commit()
-            conn.close()
-            return reservation_id
+            with self.get_cursor() as cursor:
+                p = self._param()
+                if self.is_postgres:
+                    cursor.execute(f"""
+                        INSERT INTO reservations
+                        (room_id, slack_user_id, slack_username, start_time, end_time)
+                        VALUES ({p}, {p}, {p}, {p}, {p})
+                        RETURNING id
+                    """, (room_id, slack_user_id, slack_username, start_time, end_time))
+                    return cursor.fetchone()[0]
+                else:
+                    cursor.execute(f"""
+                        INSERT INTO reservations
+                        (room_id, slack_user_id, slack_username, start_time, end_time)
+                        VALUES ({p}, {p}, {p}, {p}, {p})
+                    """, (room_id, slack_user_id, slack_username, start_time, end_time))
+                    return cursor.lastrowid
         except Exception as e:
-            conn.close()
-            print(f"Error creating reservation: {e}")
+            logger.error(f"Error creating reservation: {e}")
             return None
 
     def get_weekly_reservations(self, start_date: datetime) -> List[Dict]:
@@ -220,113 +224,77 @@ class Database:
         from datetime import timedelta
         end_date = start_date + timedelta(days=7)
 
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        p = self._param()
-        cursor.execute(f"""
-            SELECT r.*, rm.name as room_name
-            FROM reservations r
-            JOIN rooms rm ON r.room_id = rm.id
-            WHERE r.start_time >= {p} AND r.start_time < {p}
-            ORDER BY rm.name, r.start_time
-        """, (start_date, end_date))
-
-        rows = cursor.fetchall()
-        result = self._fetchall_dict(cursor, rows)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            p = self._param()
+            cursor.execute(f"""
+                SELECT r.*, rm.name as room_name
+                FROM reservations r
+                JOIN rooms rm ON r.room_id = rm.id
+                WHERE r.start_time >= {p} AND r.start_time < {p}
+                ORDER BY rm.name, r.start_time
+            """, (start_date, end_date))
+            return self._fetchall_dict(cursor, cursor.fetchall())
 
     def get_all_rooms(self) -> List[Dict]:
         """Get all available rooms."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM rooms ORDER BY name")
-        rows = cursor.fetchall()
-        result = self._fetchall_dict(cursor, rows)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            cursor.execute("SELECT * FROM rooms ORDER BY name")
+            return self._fetchall_dict(cursor, cursor.fetchall())
 
     def get_user_reservations(self, slack_user_id: str) -> List[Dict]:
         """Get all future reservations for a specific user."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        now = datetime.now()
-        p = self._param()
-        cursor.execute(f"""
-            SELECT r.*, rm.name as room_name
-            FROM reservations r
-            JOIN rooms rm ON r.room_id = rm.id
-            WHERE r.slack_user_id = {p} AND r.end_time > {p}
-            ORDER BY r.start_time
-        """, (slack_user_id, now))
-
-        rows = cursor.fetchall()
-        result = self._fetchall_dict(cursor, rows)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            now = datetime.now()
+            p = self._param()
+            cursor.execute(f"""
+                SELECT r.*, rm.name as room_name
+                FROM reservations r
+                JOIN rooms rm ON r.room_id = rm.id
+                WHERE r.slack_user_id = {p} AND r.end_time > {p}
+                ORDER BY r.start_time
+            """, (slack_user_id, now))
+            return self._fetchall_dict(cursor, cursor.fetchall())
 
     def delete_reservation(self, reservation_id: int, slack_user_id: str) -> bool:
         """Delete a reservation by ID. Only allows deletion by the owner."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
         try:
-            p = self._param()
-            cursor.execute(f"""
-                DELETE FROM reservations
-                WHERE id = {p} AND slack_user_id = {p}
-            """, (reservation_id, slack_user_id))
-
-            conn.commit()
-            deleted = cursor.rowcount > 0
-            conn.close()
-            return deleted
+            with self.get_cursor() as cursor:
+                p = self._param()
+                cursor.execute(f"""
+                    DELETE FROM reservations
+                    WHERE id = {p} AND slack_user_id = {p}
+                """, (reservation_id, slack_user_id))
+                return cursor.rowcount > 0
         except Exception as e:
-            conn.close()
-            print(f"Error deleting reservation: {e}")
+            logger.error(f"Error deleting reservation: {e}")
             return False
 
     def get_reservation_by_id(self, reservation_id: int) -> Optional[Dict]:
         """Get a reservation by ID."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        p = self._param()
-        cursor.execute(f"""
-            SELECT r.*, rm.name as room_name
-            FROM reservations r
-            JOIN rooms rm ON r.room_id = rm.id
-            WHERE r.id = {p}
-        """, (reservation_id,))
-
-        row = cursor.fetchone()
-        result = self._fetchone_dict(cursor, row)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            p = self._param()
+            cursor.execute(f"""
+                SELECT r.*, rm.name as room_name
+                FROM reservations r
+                JOIN rooms rm ON r.room_id = rm.id
+                WHERE r.id = {p}
+            """, (reservation_id,))
+            return self._fetchone_dict(cursor, cursor.fetchone())
 
     def get_all_future_reservations(self, limit: int = 50) -> List[Dict]:
         """Get all future reservations across all rooms."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        now = datetime.now()
-        p = self._param()
-        cursor.execute(f"""
-            SELECT r.*, rm.name as room_name
-            FROM reservations r
-            JOIN rooms rm ON r.room_id = rm.id
-            WHERE r.end_time > {p}
-            ORDER BY r.start_time
-            LIMIT {limit}
-        """, (now,))
-
-        rows = cursor.fetchall()
-        result = self._fetchall_dict(cursor, rows)
-        conn.close()
-        return result
+        with self.get_cursor() as cursor:
+            now = datetime.now()
+            p = self._param()
+            cursor.execute(f"""
+                SELECT r.*, rm.name as room_name
+                FROM reservations r
+                JOIN rooms rm ON r.room_id = rm.id
+                WHERE r.end_time > {p}
+                ORDER BY r.start_time
+                LIMIT {limit}
+            """, (now,))
+            return self._fetchall_dict(cursor, cursor.fetchall())
 
     def create_recurring_reservations(
         self,
@@ -339,23 +307,27 @@ class Database:
         end_minute: int,
         weekday: int,
         weeks: int = 4
-    ) -> List[int]:
+    ) -> Tuple[List[int], List[str]]:
         """
         Create recurring reservations for N weeks.
-        weekday: 0=Monday, 1=Tuesday, ..., 6=Sunday
-        Returns list of created reservation IDs.
+
+        Args:
+            weekday: 0=Monday, 1=Tuesday, ..., 6=Sunday
+            weeks: Number of weeks to create reservations for
+
+        Returns:
+            Tuple of (created_reservation_ids, conflict_dates)
         """
         from datetime import timedelta
 
         now = datetime.now()
-        # Find the next occurrence of the specified weekday
         days_ahead = weekday - now.weekday()
-        if days_ahead <= 0:  # Target day already happened this week
+        if days_ahead <= 0:
             days_ahead += 7
 
         next_date = now + timedelta(days=days_ahead)
-        created_ids = []
-        conflicts = []
+        created_ids: List[int] = []
+        conflicts: List[str] = []
 
         for week in range(weeks):
             target_date = next_date + timedelta(weeks=week)
@@ -369,32 +341,26 @@ class Database:
                 continue
 
             # Create reservation
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            p = self._param()
-
             try:
-                if self.is_postgres:
-                    cursor.execute(f"""
-                        INSERT INTO reservations
-                        (room_id, slack_user_id, slack_username, start_time, end_time)
-                        VALUES ({p}, {p}, {p}, {p}, {p})
-                        RETURNING id
-                    """, (room_id, slack_user_id, slack_username, start_time, end_time))
-                    reservation_id = cursor.fetchone()[0]
-                else:
-                    cursor.execute(f"""
-                        INSERT INTO reservations
-                        (room_id, slack_user_id, slack_username, start_time, end_time)
-                        VALUES ({p}, {p}, {p}, {p}, {p})
-                    """, (room_id, slack_user_id, slack_username, start_time, end_time))
-                    reservation_id = cursor.lastrowid
-
-                conn.commit()
-                created_ids.append(reservation_id)
+                with self.get_cursor() as cursor:
+                    p = self._param()
+                    if self.is_postgres:
+                        cursor.execute(f"""
+                            INSERT INTO reservations
+                            (room_id, slack_user_id, slack_username, start_time, end_time)
+                            VALUES ({p}, {p}, {p}, {p}, {p})
+                            RETURNING id
+                        """, (room_id, slack_user_id, slack_username, start_time, end_time))
+                        reservation_id = cursor.fetchone()[0]
+                    else:
+                        cursor.execute(f"""
+                            INSERT INTO reservations
+                            (room_id, slack_user_id, slack_username, start_time, end_time)
+                            VALUES ({p}, {p}, {p}, {p}, {p})
+                        """, (room_id, slack_user_id, slack_username, start_time, end_time))
+                        reservation_id = cursor.lastrowid
+                    created_ids.append(reservation_id)
             except Exception as e:
-                print(f"Error creating recurring reservation: {e}")
-            finally:
-                conn.close()
+                logger.error(f"Error creating recurring reservation for {target_date}: {e}")
 
         return created_ids, conflicts
