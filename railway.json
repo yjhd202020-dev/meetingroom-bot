@@ -5,7 +5,7 @@
     "buildCommand": "cd frontend && npm install && npm run build && cd .."
   },
   "deploy": {
-    "startCommand": "cd src && python main.py",
+    "startCommand": "cd src && python3 main.py",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
